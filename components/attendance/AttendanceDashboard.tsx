@@ -33,20 +33,40 @@ function formatShortDate(dateString: string) {
   return dateString.replaceAll("-", ".");
 }
 
+function formatDateString(year: number, month: number, day: number) {
+  return [year, month, day].map((value) => String(value).padStart(2, "0")).join("-");
+}
+
+function isLeapYear(year: number) {
+  return year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0);
+}
+
+function getDaysInMonth(year: number, month: number) {
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function getFirstDayOfMonth(year: number, month: number) {
+  const offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+  const adjustedYear = month < 3 ? year - 1 : year;
+  return (adjustedYear + Math.floor(adjustedYear / 4) - Math.floor(adjustedYear / 100) + Math.floor(adjustedYear / 400) + offsets[month - 1] + 1) % 7;
+}
+
 function buildCalendarDays(year: number, month: number) {
-  const first = new Date(Date.UTC(year, month - 1, 1));
-  const last = new Date(Date.UTC(year, month, 0));
-  const leading = first.getUTCDay();
+  const leading = getFirstDayOfMonth(year, month);
+  const lastDay = getDaysInMonth(year, month);
   const days: Array<{ date: string; day: number; isCurrentMonth: boolean }> = [];
 
   for (let i = 0; i < leading; i += 1) {
     days.push({ date: `empty-${i}`, day: 0, isCurrentMonth: false });
   }
 
-  for (let day = 1; day <= last.getUTCDate(); day += 1) {
-    const date = new Date(Date.UTC(year, month - 1, day));
+  for (let day = 1; day <= lastDay; day += 1) {
     days.push({
-      date: date.toISOString().slice(0, 10),
+      date: formatDateString(year, month, day),
       day,
       isCurrentMonth: true
     });
@@ -149,15 +169,15 @@ export function AttendanceDashboard() {
       </div>
 
       <div className="app-card p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
+        <div className="mb-4 grid gap-3">
+          <div className="min-w-0">
             <p className="app-section-title">월간 캘린더</p>
             <p className="mt-1 text-xl font-black text-[#111827]">
               {data.month.year}년 {data.month.month}월
             </p>
           </div>
           <input
-            className="w-36 rounded-[14px] bg-[#F8FAFF] px-3 py-2 text-sm font-semibold text-[#111827] ring-1 ring-[#E5E7EB]"
+            className="w-full rounded-[14px] bg-[#F8FAFF] px-3 py-2 text-sm font-semibold text-[#111827] ring-1 ring-[#E5E7EB]"
             onChange={(event) => {
               setMonth(event.target.value);
               void loadAttendance(event.target.value, `${event.target.value}-01`);

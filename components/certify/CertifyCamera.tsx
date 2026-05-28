@@ -57,18 +57,34 @@ function getResizedSize(width: number, height: number) {
   };
 }
 
+function isCameraPermissionError(error: unknown) {
+  return (
+    error instanceof DOMException &&
+    (error.name === "NotAllowedError" || error.name === "PermissionDeniedError")
+  );
+}
+
 function getCameraErrorMessage(error: unknown) {
   if (error instanceof DOMException) {
-    if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-      return "카메라 권한이 필요합니다. 브라우저 주소창 왼쪽의 권한 설정에서 카메라를 허용한 뒤 다시 시도해주세요.";
+    if (isCameraPermissionError(error)) {
+      return {
+        title: "카메라 권한이 필요합니다.",
+        description: "브라우저 설정에서 카메라 권한을 허용한 뒤 다시 시도해주세요."
+      };
     }
 
     if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
-      return "사용 가능한 카메라를 찾을 수 없습니다. 모바일 기기에서 다시 시도해주세요.";
+      return {
+        title: "사용 가능한 카메라를 찾을 수 없습니다.",
+        description: "모바일 기기에서 다시 시도해주세요."
+      };
     }
   }
 
-  return "카메라를 시작하지 못했습니다. 권한과 장치 상태를 확인한 뒤 다시 시도해주세요.";
+  return {
+    title: "카메라를 시작하지 못했습니다.",
+    description: "권한과 장치 상태를 확인한 뒤 다시 시도해주세요."
+  };
 }
 
 function drawWatermark(context: CanvasRenderingContext2D, width: number, height: number, text: string) {
@@ -100,8 +116,8 @@ export function CertifyCamera() {
   const streamRef = useRef<MediaStream | null>(null);
   const previewBlobRef = useRef<Blob | null>(null);
   const [currentTime, setCurrentTime] = useState(() => getKoreaDateTime());
-  const [message, setMessage] = useState("카메라 권한을 허용하면 촬영할 수 있습니다.");
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [message, setMessage] = useState("버튼을 눌러 카메라 권한을 요청하세요.");
+  const [cameraError, setCameraError] = useState<{ title: string; description: string } | null>(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -136,9 +152,12 @@ export function CertifyCamera() {
     setCameraError(null);
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      const errorMessage = "사용 가능한 카메라를 찾을 수 없습니다. 모바일 기기에서 다시 시도해주세요.";
+      const errorMessage = {
+        title: "사용 가능한 카메라를 찾을 수 없습니다.",
+        description: "모바일 기기에서 다시 시도해주세요."
+      };
       setCameraError(errorMessage);
-      setMessage(errorMessage);
+      setMessage(errorMessage.title);
       return;
     }
 
@@ -157,7 +176,11 @@ export function CertifyCamera() {
           },
           audio: false
         });
-      } catch {
+      } catch (firstError) {
+        if (isCameraPermissionError(firstError)) {
+          throw firstError;
+        }
+
         stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: false
@@ -176,7 +199,7 @@ export function CertifyCamera() {
     } catch (error) {
       const errorMessage = getCameraErrorMessage(error);
       setCameraError(errorMessage);
-      setMessage(errorMessage);
+      setMessage(errorMessage.title);
     } finally {
       setIsStarting(false);
     }
@@ -316,6 +339,14 @@ export function CertifyCamera() {
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img alt="촬영한 운동 인증 사진 미리보기" className="aspect-[3/4] w-full rounded-[20px] object-contain" src={previewUrl} />
+        ) : !isCameraReady ? (
+          <div className="flex aspect-[3/4] w-full flex-col items-center justify-center rounded-[20px] bg-[#F8FAFF] px-6 text-center">
+            <p className="text-4xl">📷</p>
+            <p className="mt-4 text-xl font-black text-[#111827]">카메라 준비</p>
+            <p className="mt-2 text-sm font-semibold leading-6 text-[#6B7280]">
+              사진으로 인증하기를 누르면 카메라 권한을 요청합니다.
+            </p>
+          </div>
         ) : (
           <video
             autoPlay
@@ -331,7 +362,8 @@ export function CertifyCamera() {
 
       {cameraError && !previewUrl ? (
         <div className="app-card p-5">
-          <p className="text-sm font-bold leading-6 text-[#6B7280]">{cameraError}</p>
+          <p className="text-base font-black text-[#111827]">{cameraError.title}</p>
+          <p className="mt-2 text-sm font-semibold leading-6 text-[#6B7280]">{cameraError.description}</p>
           <button
             className="app-primary-button mt-4 w-full"
             disabled={isStarting}
@@ -394,7 +426,7 @@ export function CertifyCamera() {
             onClick={isCameraReady ? capturePhoto : startCamera}
             type="button"
           >
-            {isCameraReady ? "촬영하기" : isStarting ? "카메라 준비 중" : "카메라 시작"}
+            {isCameraReady ? "촬영하기" : isStarting ? "카메라 준비 중" : "사진으로 인증하기"}
           </button>
           {isCameraReady ? (
             <button

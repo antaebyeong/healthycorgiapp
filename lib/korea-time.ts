@@ -37,39 +37,90 @@ export function getKoreaTimestampString(date = new Date()) {
   return `${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}${parts.second}`;
 }
 
-export function parseDateStringAsUtc(dateString: string) {
-  return new Date(`${dateString}T00:00:00.000Z`);
+function parseDateString(dateString: string) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return { year, month, day };
 }
 
-export function formatUtcDateString(date: Date) {
-  return date.toISOString().slice(0, 10);
+function formatDateString(year: number, month: number, day: number) {
+  return [year, month, day].map((value) => String(value).padStart(2, "0")).join("-");
+}
+
+function isLeapYear(year: number) {
+  return year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0);
+}
+
+function getDaysInMonth(year: number, month: number) {
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function getDayOfWeek(year: number, month: number, day: number) {
+  const offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+  const adjustedYear = month < 3 ? year - 1 : year;
+  return (adjustedYear + Math.floor(adjustedYear / 4) - Math.floor(adjustedYear / 100) + Math.floor(adjustedYear / 400) + offsets[month - 1] + day) % 7;
+}
+
+function addDays(dateString: string, amount: number) {
+  let { year, month, day } = parseDateString(dateString);
+  let remaining = amount;
+
+  while (remaining > 0) {
+    const daysInMonth = getDaysInMonth(year, month);
+    if (day + remaining <= daysInMonth) {
+      day += remaining;
+      remaining = 0;
+    } else {
+      remaining -= daysInMonth - day + 1;
+      day = 1;
+      month += 1;
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+    }
+  }
+
+  while (remaining < 0) {
+    if (day + remaining >= 1) {
+      day += remaining;
+      remaining = 0;
+    } else {
+      remaining += day;
+      month -= 1;
+      if (month < 1) {
+        month = 12;
+        year -= 1;
+      }
+      day = getDaysInMonth(year, month);
+    }
+  }
+
+  return formatDateString(year, month, day);
 }
 
 export function getWeekRangeMondayToSunday(dateString: string) {
-  const date = parseDateStringAsUtc(dateString);
-  const day = date.getUTCDay();
+  const date = parseDateString(dateString);
+  const day = getDayOfWeek(date.year, date.month, date.day);
   const mondayOffset = day === 0 ? -6 : 1 - day;
-  const monday = new Date(date);
-  monday.setUTCDate(date.getUTCDate() + mondayOffset);
-
-  const sunday = new Date(monday);
-  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const monday = addDays(dateString, mondayOffset);
 
   return {
-    start: formatUtcDateString(monday),
-    end: formatUtcDateString(sunday)
+    start: monday,
+    end: addDays(monday, 6)
   };
 }
 
 export function getMonthRange(dateString: string) {
-  const date = parseDateStringAsUtc(dateString);
-  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+  const date = parseDateString(dateString);
 
   return {
-    start: formatUtcDateString(start),
-    end: formatUtcDateString(end),
-    year: date.getUTCFullYear(),
-    month: date.getUTCMonth() + 1
+    start: formatDateString(date.year, date.month, 1),
+    end: formatDateString(date.year, date.month, getDaysInMonth(date.year, date.month)),
+    year: date.year,
+    month: date.month
   };
 }

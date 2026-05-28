@@ -67,7 +67,7 @@ export default function SplashPage() {
   return (
     <main
       aria-label="헬시코기 시작 화면"
-      className="fixed inset-0 h-screen w-screen cursor-pointer overflow-hidden bg-[#111827]"
+      className="fixed inset-0 h-screen w-full cursor-pointer overflow-hidden bg-[#111827]"
       onClick={handleSkip}
       onTouchStart={handleSkip}
     >
