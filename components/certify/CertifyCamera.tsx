@@ -6,7 +6,8 @@ import { CorgiMark } from "@/components/brand/CorgiMark";
 
 const MAX_IMAGE_SIZE = 1280;
 const JPEG_QUALITY = 0.8;
-const CAMERA_PREVIEW_TIMEOUT_MS = 6000;
+const VIDEO_RENDER_RETRY_MS = 800;
+const CAMERA_PREVIEW_TIMEOUT_MS = 7000;
 const IS_DEVELOPMENT = process.env.NODE_ENV === "development";
 
 type InAppBrowserInfo = {
@@ -17,6 +18,13 @@ type InAppBrowserInfo = {
 type CameraMessage = {
   title: string;
   description: string;
+};
+
+type CameraDebug = {
+  videoWidth: number;
+  videoHeight: number;
+  readyState: number;
+  streamActive: boolean;
 };
 
 function detectInAppBrowser(userAgent: string): InAppBrowserInfo {
@@ -187,12 +195,24 @@ function waitFrame() {
   });
 }
 
-function playVideo(video: HTMLVideoElement) {
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function prepareVideoElement(video: HTMLVideoElement) {
   video.muted = true;
   video.autoplay = true;
   video.playsInline = true;
   video.controls = false;
-  return video.play();
+  video.setAttribute("playsinline", "true");
+  video.setAttribute("webkit-playsinline", "true");
+}
+
+async function playVideo(video: HTMLVideoElement) {
+  prepareVideoElement(video);
+  await video.play();
 }
 
 async function loadImageFromFile(file: File) {
@@ -228,6 +248,7 @@ export function CertifyCamera() {
   const streamRef = useRef<MediaStream | null>(null);
   const previewBlobRef = useRef<Blob | null>(null);
   const previewTimeoutRef = useRef<number | null>(null);
+  const retryTimeoutRef = useRef<number | null>(null);
   const [currentTime, setCurrentTime] = useState(() => getKoreaDateTime());
   const [message, setMessage] = useState("버튼을 눌러 카메라 권한을 요청하세요.");
   const [cameraError, setCameraError] = useState<CameraMessage | null>(null);
@@ -239,49 +260,140 @@ export function CertifyCamera() {
   const [downloadName, setDownloadName] = useState("healthycorgi-certification.jpg");
   const [uploadedRecordId, setUploadedRecordId] = useState<string | null>(null);
   const [inAppBrowser, setInAppBrowser] = useState<InAppBrowserInfo>({ isInApp: false, platform: "other" });
+  const [debug, setDebug] = useState<CameraDebug>({
+    videoWidth: 0,
+    videoHeight: 0,
+    readyState: 0,
+    streamActive: false
+  });
 
-  const clearPreviewTimeout = useCallback(() => {
+  const updateDebug = useCallback(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+
+    setDebug({
+      videoWidth: video?.videoWidth || 0,
+      videoHeight: video?.videoHeight || 0,
+      readyState: video?.readyState || 0,
+      streamActive: Boolean(stream?.active)
+    });
+  }, []);
+
+  const clearPreviewTimers = useCallback(() => {
     if (previewTimeoutRef.current) {
       window.clearTimeout(previewTimeoutRef.current);
       previewTimeoutRef.current = null;
     }
+
+    if (retryTimeoutRef.current) {
+      window.clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
   }, []);
 
   const stopCamera = useCallback(() => {
-    clearPreviewTimeout();
+    clearPreviewTimers();
 
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.srcObject = null;
+      videoRef.current.removeAttribute("src");
+      videoRef.current.load();
     }
 
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setHasCameraStream(false);
     setIsPreviewReady(false);
-  }, [clearPreviewTimeout]);
+    updateDebug();
+  }, [clearPreviewTimers, updateDebug]);
 
   const markPreviewReady = useCallback(async () => {
     const video = videoRef.current;
 
     if (!video) {
+      return false;
+    }
+
+    prepareVideoElement(video);
+
+    try {
+      await video.play();
+    } catch {
+      // Safari can reject an early play call. The retry path below will call it again.
+    }
+
+    updateDebug();
+
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      clearPreviewTimers();
+      setIsPreviewReady(true);
+      setMessage("현재 화면을 촬영할 수 있습니다.");
+      return true;
+    }
+
+    setIsPreviewReady(false);
+    setMessage("카메라 화면을 불러오는 중입니다.");
+    return false;
+  }, [clearPreviewTimers, updateDebug]);
+
+  const retryVideoRender = useCallback(async () => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+
+    if (!video || !stream) {
       return;
     }
+
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      await markPreviewReady();
+      return;
+    }
+
+    setMessage("카메라 화면을 다시 연결하는 중입니다.");
+    prepareVideoElement(video);
+    video.pause();
+    video.srcObject = null;
+    video.load();
+    await waitFrame();
+    video.srcObject = stream;
 
     try {
       await playVideo(video);
     } catch {
-      // iOS can reject an early play call; the click-triggered start path retries it.
+      // The final timeout displays the user-facing failure state if rendering still fails.
     }
 
+    await waitFrame();
+    updateDebug();
+
     if (video.videoWidth > 0 && video.videoHeight > 0) {
-      clearPreviewTimeout();
-      setIsPreviewReady(true);
-      setMessage("현재 화면을 촬영할 수 있습니다.");
+      await markPreviewReady();
     } else {
       setMessage("카메라 화면을 불러오는 중입니다.");
     }
-  }, [clearPreviewTimeout]);
+  }, [markPreviewReady, updateDebug]);
+
+  const schedulePreviewChecks = useCallback(() => {
+    clearPreviewTimers();
+
+    retryTimeoutRef.current = window.setTimeout(() => {
+      void retryVideoRender();
+    }, VIDEO_RENDER_RETRY_MS);
+
+    previewTimeoutRef.current = window.setTimeout(() => {
+      const video = videoRef.current;
+
+      if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+        stopCamera();
+        setCameraError({
+          title: "카메라가 켜졌지만 화면을 표시하지 못했습니다.",
+          description: "Safari를 새로고침한 뒤 다시 시도해주세요."
+        });
+        setMessage("카메라가 켜졌지만 화면을 표시하지 못했습니다.");
+      }
+    }, CAMERA_PREVIEW_TIMEOUT_MS);
+  }, [clearPreviewTimers, retryVideoRender, stopCamera]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -305,7 +417,7 @@ export function CertifyCamera() {
   }, [previewUrl, stopCamera]);
 
   async function waitForVideoElement() {
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 12; i += 1) {
       await waitFrame();
 
       if (videoRef.current) {
@@ -328,24 +440,13 @@ export function CertifyCamera() {
       throw new Error("Video element is not ready");
     }
 
+    prepareVideoElement(video);
     video.srcObject = stream;
 
     await waitFrame();
     await playVideo(video);
-
-    clearPreviewTimeout();
-    previewTimeoutRef.current = window.setTimeout(() => {
-      const currentVideo = videoRef.current;
-
-      if (!currentVideo || currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
-        stopCamera();
-        setCameraError({
-          title: "카메라 화면을 불러오지 못했습니다.",
-          description: "Safari에서 페이지를 새로고침한 뒤 다시 시도해주세요."
-        });
-        setMessage("카메라 화면을 불러오지 못했습니다.");
-      }
-    }, CAMERA_PREVIEW_TIMEOUT_MS);
+    updateDebug();
+    schedulePreviewChecks();
 
     if (video.videoWidth > 0 && video.videoHeight > 0) {
       await markPreviewReady();
@@ -564,12 +665,15 @@ export function CertifyCamera() {
           // eslint-disable-next-line @next/next/no-img-element
           <img alt="촬영한 운동 인증 사진 미리보기" className="aspect-[3/4] w-full rounded-[20px] object-contain" src={previewUrl} />
         ) : hasCameraStream ? (
-          <div className="relative aspect-[3/4] w-full overflow-hidden rounded-[20px] bg-[#111827]">
+          <div className="relative aspect-[3/4] w-full rounded-[20px] bg-black">
             <video
               autoPlay
-              className="block h-full w-full bg-[#111827] object-cover opacity-100"
+              className="block h-full w-full rounded-[20px] bg-black object-cover opacity-100 [visibility:visible]"
               controls={false}
               muted
+              onCanPlay={() => {
+                void markPreviewReady();
+              }}
               onLoadedMetadata={() => {
                 void markPreviewReady();
               }}
@@ -580,14 +684,13 @@ export function CertifyCamera() {
               ref={videoRef}
             />
             {!isPreviewReady ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-[#111827]/70 px-6 text-center">
+              <div className="pointer-events-none absolute inset-x-3 bottom-3 rounded-[16px] bg-black/60 px-4 py-3 text-center">
                 <p className="text-sm font-black leading-6 text-white">카메라 화면을 불러오는 중입니다.</p>
               </div>
             ) : null}
           </div>
         ) : (
           <div className="flex aspect-[3/4] w-full flex-col items-center justify-center rounded-[20px] bg-[#F8FAFF] px-6 text-center">
-            <p className="text-4xl">🐾</p>
             <p className="mt-4 text-xl font-black text-[#111827]">카메라 준비</p>
             <p className="mt-2 text-sm font-semibold leading-6 text-[#6B7280]">
               사진으로 인증하기를 누르면 카메라 권한을 요청합니다.
@@ -597,6 +700,13 @@ export function CertifyCamera() {
       </div>
 
       <p className="app-card-soft px-5 py-4 text-sm font-semibold leading-6 text-[#6B7280]">{message}</p>
+
+      {IS_DEVELOPMENT && hasCameraStream ? (
+        <p className="px-2 text-[11px] font-semibold text-[#9CA3AF]">
+          video {debug.videoWidth}x{debug.videoHeight} / readyState {debug.readyState} / stream{" "}
+          {debug.streamActive ? "active" : "inactive"}
+        </p>
+      ) : null}
 
       {cameraError && !previewUrl ? (
         <div className="app-card p-5">
