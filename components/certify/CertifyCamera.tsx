@@ -195,12 +195,6 @@ function waitFrame() {
   });
 }
 
-function wait(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
 function prepareVideoElement(video: HTMLVideoElement) {
   video.muted = true;
   video.autoplay = true;
