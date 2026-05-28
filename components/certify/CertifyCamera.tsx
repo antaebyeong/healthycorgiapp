@@ -6,11 +6,17 @@ import { CorgiMark } from "@/components/brand/CorgiMark";
 
 const MAX_IMAGE_SIZE = 1280;
 const JPEG_QUALITY = 0.8;
+const CAMERA_PREVIEW_TIMEOUT_MS = 6000;
 const IS_DEVELOPMENT = process.env.NODE_ENV === "development";
 
 type InAppBrowserInfo = {
   isInApp: boolean;
   platform: "ios" | "android" | "other";
+};
+
+type CameraMessage = {
+  title: string;
+  description: string;
 };
 
 function detectInAppBrowser(userAgent: string): InAppBrowserInfo {
@@ -25,11 +31,10 @@ function detectInAppBrowser(userAgent: string): InAppBrowserInfo {
     normalized.includes("wv");
 
   const platform = /iphone|ipad|ipod/.test(normalized) ? "ios" : /android/.test(normalized) ? "android" : "other";
-
   return { isInApp, platform };
 }
 
-function getInAppBrowserGuide(info: InAppBrowserInfo) {
+function getInAppBrowserGuide(info: InAppBrowserInfo): CameraMessage {
   const platformGuide =
     info.platform === "ios"
       ? "오른쪽 아래 또는 공유 메뉴에서 Safari로 열어주세요."
@@ -93,13 +98,10 @@ function getResizedSize(width: number, height: number) {
 }
 
 function isCameraPermissionError(error: unknown) {
-  return (
-    error instanceof DOMException &&
-    (error.name === "NotAllowedError" || error.name === "PermissionDeniedError")
-  );
+  return error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "PermissionDeniedError");
 }
 
-function getCameraErrorMessage(error: unknown) {
+function getCameraErrorMessage(error: unknown): CameraMessage {
   if (error instanceof DOMException) {
     if (isCameraPermissionError(error)) {
       return {
@@ -114,34 +116,19 @@ function getCameraErrorMessage(error: unknown) {
         description: "모바일 기기에서 다시 시도해주세요."
       };
     }
+
+    if (error.name === "NotReadableError") {
+      return {
+        title: "카메라를 사용할 수 없습니다.",
+        description: "다른 앱에서 카메라를 사용 중일 수 있습니다."
+      };
+    }
   }
 
   return {
-    title: "카메라를 시작하지 못했습니다.",
-    description: "권한과 장치 상태를 확인한 뒤 다시 시도해주세요."
+    title: "카메라를 시작할 수 없습니다.",
+    description: "Safari에서 다시 시도해주세요."
   };
-}
-
-function drawWatermark(context: CanvasRenderingContext2D, width: number, height: number, text: string) {
-  const padding = Math.max(18, Math.round(width * 0.026));
-  const fontSize = Math.max(18, Math.round(width * 0.034));
-
-  context.font = `700 ${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-
-  const metrics = context.measureText(text);
-  const boxWidth = Math.min(width - padding * 2, metrics.width + padding * 2);
-  const boxHeight = fontSize + padding * 1.25;
-  const x = (width - boxWidth) / 2;
-  const y = height - padding - boxHeight;
-  const radius = Math.max(10, Math.round(fontSize * 0.35));
-
-  context.fillStyle = "rgba(20, 16, 12, 0.74)";
-  drawRoundedRect(context, x, y, boxWidth, boxHeight, radius);
-
-  context.fillStyle = "#FFFFFF";
-  context.fillText(text, width / 2, y + boxHeight / 2);
 }
 
 function drawRoundedRect(
@@ -172,14 +159,80 @@ function drawRoundedRect(
   context.fill();
 }
 
+function drawWatermark(context: CanvasRenderingContext2D, width: number, height: number, text: string) {
+  const padding = Math.max(18, Math.round(width * 0.026));
+  const fontSize = Math.max(18, Math.round(width * 0.034));
+
+  context.font = `700 ${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  const metrics = context.measureText(text);
+  const boxWidth = Math.min(width - padding * 2, metrics.width + padding * 2);
+  const boxHeight = fontSize + padding * 1.25;
+  const x = (width - boxWidth) / 2;
+  const y = height - padding - boxHeight;
+  const radius = Math.max(10, Math.round(fontSize * 0.35));
+
+  context.fillStyle = "rgba(20, 16, 12, 0.74)";
+  drawRoundedRect(context, x, y, boxWidth, boxHeight, radius);
+
+  context.fillStyle = "#FFFFFF";
+  context.fillText(text, width / 2, y + boxHeight / 2);
+}
+
+function waitFrame() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
+function playVideo(video: HTMLVideoElement) {
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.controls = false;
+  return video.play();
+}
+
+async function loadImageFromFile(file: File) {
+  if ("createImageBitmap" in window) {
+    const image = await createImageBitmap(file);
+    return {
+      source: image,
+      width: image.width,
+      height: image.height,
+      cleanup: () => image.close()
+    };
+  }
+
+  const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.src = url;
+
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Image load failed"));
+  });
+
+  return {
+    source: image,
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+    cleanup: () => URL.revokeObjectURL(url)
+  };
+}
+
 export function CertifyCamera() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const previewBlobRef = useRef<Blob | null>(null);
+  const previewTimeoutRef = useRef<number | null>(null);
   const [currentTime, setCurrentTime] = useState(() => getKoreaDateTime());
   const [message, setMessage] = useState("버튼을 눌러 카메라 권한을 요청하세요.");
-  const [cameraError, setCameraError] = useState<{ title: string; description: string } | null>(null);
-  const [isCameraReady, setIsCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState<CameraMessage | null>(null);
+  const [hasCameraStream, setHasCameraStream] = useState(false);
+  const [isPreviewReady, setIsPreviewReady] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -187,11 +240,48 @@ export function CertifyCamera() {
   const [uploadedRecordId, setUploadedRecordId] = useState<string | null>(null);
   const [inAppBrowser, setInAppBrowser] = useState<InAppBrowserInfo>({ isInApp: false, platform: "other" });
 
+  const clearPreviewTimeout = useCallback(() => {
+    if (previewTimeoutRef.current) {
+      window.clearTimeout(previewTimeoutRef.current);
+      previewTimeoutRef.current = null;
+    }
+  }, []);
+
   const stopCamera = useCallback(() => {
+    clearPreviewTimeout();
+
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
+
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    setIsCameraReady(false);
-  }, []);
+    setHasCameraStream(false);
+    setIsPreviewReady(false);
+  }, [clearPreviewTimeout]);
+
+  const markPreviewReady = useCallback(async () => {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    try {
+      await playVideo(video);
+    } catch {
+      // iOS can reject an early play call; the click-triggered start path retries it.
+    }
+
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      clearPreviewTimeout();
+      setIsPreviewReady(true);
+      setMessage("현재 화면을 촬영할 수 있습니다.");
+    } else {
+      setMessage("카메라 화면을 불러오는 중입니다.");
+    }
+  }, [clearPreviewTimeout]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -214,8 +304,57 @@ export function CertifyCamera() {
     };
   }, [previewUrl, stopCamera]);
 
+  async function waitForVideoElement() {
+    for (let i = 0; i < 10; i += 1) {
+      await waitFrame();
+
+      if (videoRef.current) {
+        return videoRef.current;
+      }
+    }
+
+    return null;
+  }
+
+  async function connectStreamToVideo(stream: MediaStream) {
+    streamRef.current = stream;
+    setHasCameraStream(true);
+    setIsPreviewReady(false);
+    setMessage("카메라 화면을 불러오는 중입니다.");
+
+    const video = await waitForVideoElement();
+
+    if (!video) {
+      throw new Error("Video element is not ready");
+    }
+
+    video.srcObject = stream;
+
+    await waitFrame();
+    await playVideo(video);
+
+    clearPreviewTimeout();
+    previewTimeoutRef.current = window.setTimeout(() => {
+      const currentVideo = videoRef.current;
+
+      if (!currentVideo || currentVideo.videoWidth === 0 || currentVideo.videoHeight === 0) {
+        stopCamera();
+        setCameraError({
+          title: "카메라 화면을 불러오지 못했습니다.",
+          description: "Safari에서 페이지를 새로고침한 뒤 다시 시도해주세요."
+        });
+        setMessage("카메라 화면을 불러오지 못했습니다.");
+      }
+    }, CAMERA_PREVIEW_TIMEOUT_MS);
+
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      await markPreviewReady();
+    }
+  }
+
   async function startCamera() {
     setCameraError(null);
+    setIsPreviewReady(false);
 
     if (inAppBrowser.isInApp) {
       const guide = getInAppBrowserGuide(inAppBrowser);
@@ -234,6 +373,7 @@ export function CertifyCamera() {
       return;
     }
 
+    stopCamera();
     setIsStarting(true);
     setMessage("카메라를 준비하는 중입니다.");
 
@@ -244,8 +384,8 @@ export function CertifyCamera() {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: "environment" },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
           },
           audio: false
         });
@@ -260,16 +400,9 @@ export function CertifyCamera() {
         });
       }
 
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-
-      setIsCameraReady(true);
-      setMessage("현재 화면을 촬영할 수 있습니다.");
+      await connectStreamToVideo(stream);
     } catch (error) {
+      stopCamera();
       const errorMessage = getCameraErrorMessage(error);
       setCameraError(errorMessage);
       setMessage(errorMessage.title);
@@ -321,8 +454,8 @@ export function CertifyCamera() {
   async function capturePhoto() {
     const video = videoRef.current;
 
-    if (!video || !isCameraReady || video.videoWidth === 0 || video.videoHeight === 0) {
-      setMessage("카메라가 아직 준비되지 않았습니다.");
+    if (!video || !isPreviewReady || video.videoWidth === 0 || video.videoHeight === 0) {
+      setMessage("카메라 준비 중입니다.");
       return;
     }
 
@@ -344,9 +477,9 @@ export function CertifyCamera() {
 
     try {
       setMessage("테스트 이미지를 처리하는 중입니다.");
-      const image = await createImageBitmap(file);
-      createPreviewFromSource(image, image.width, image.height);
-      image.close();
+      const image = await loadImageFromFile(file);
+      createPreviewFromSource(image.source, image.width, image.height);
+      image.cleanup();
     } catch {
       setMessage("선택한 이미지를 처리하지 못했습니다.");
     }
@@ -360,7 +493,7 @@ export function CertifyCamera() {
     setPreviewUrl(null);
     previewBlobRef.current = null;
     setUploadedRecordId(null);
-    setMessage("다시 촬영할 수 있습니다.");
+    setMessage(hasCameraStream ? "다시 촬영할 수 있습니다." : "버튼을 눌러 카메라 권한을 요청하세요.");
   }
 
   async function uploadPhoto() {
@@ -401,6 +534,8 @@ export function CertifyCamera() {
     }
   }
 
+  const isCaptureDisabled = isStarting || !isPreviewReady;
+
   return (
     <section className="space-y-5">
       <div className="app-card px-5 py-4">
@@ -424,26 +559,40 @@ export function CertifyCamera() {
         </div>
       ) : null}
 
-      <div className="app-card overflow-hidden bg-[#111827] p-2">
+      <div className="app-card bg-[#111827] p-2">
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img alt="촬영한 운동 인증 사진 미리보기" className="aspect-[3/4] w-full rounded-[20px] object-contain" src={previewUrl} />
-        ) : !isCameraReady ? (
+        ) : hasCameraStream ? (
+          <div className="relative aspect-[3/4] w-full overflow-hidden rounded-[20px] bg-[#111827]">
+            <video
+              autoPlay
+              className="block h-full w-full bg-[#111827] object-cover opacity-100"
+              controls={false}
+              muted
+              onLoadedMetadata={() => {
+                void markPreviewReady();
+              }}
+              onPlaying={() => {
+                void markPreviewReady();
+              }}
+              playsInline
+              ref={videoRef}
+            />
+            {!isPreviewReady ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-[#111827]/70 px-6 text-center">
+                <p className="text-sm font-black leading-6 text-white">카메라 화면을 불러오는 중입니다.</p>
+              </div>
+            ) : null}
+          </div>
+        ) : (
           <div className="flex aspect-[3/4] w-full flex-col items-center justify-center rounded-[20px] bg-[#F8FAFF] px-6 text-center">
-            <p className="text-4xl">📷</p>
+            <p className="text-4xl">🐾</p>
             <p className="mt-4 text-xl font-black text-[#111827]">카메라 준비</p>
             <p className="mt-2 text-sm font-semibold leading-6 text-[#6B7280]">
               사진으로 인증하기를 누르면 카메라 권한을 요청합니다.
             </p>
           </div>
-        ) : (
-          <video
-            autoPlay
-            className="aspect-[3/4] w-full rounded-[20px] object-cover"
-            muted
-            playsInline
-            ref={videoRef}
-          />
         )}
       </div>
 
@@ -453,12 +602,7 @@ export function CertifyCamera() {
         <div className="app-card p-5">
           <p className="text-base font-black text-[#111827]">{cameraError.title}</p>
           <p className="mt-2 text-sm font-semibold leading-6 text-[#6B7280]">{cameraError.description}</p>
-          <button
-            className="app-primary-button mt-4 w-full"
-            disabled={isStarting}
-            onClick={startCamera}
-            type="button"
-          >
+          <button className="app-primary-button mt-4 w-full" disabled={isStarting} onClick={startCamera} type="button">
             다시 시도
           </button>
         </div>
@@ -483,27 +627,14 @@ export function CertifyCamera() {
               </div>
             </div>
           ) : (
-            <button
-              className="app-primary-button"
-              disabled={isUploading}
-              onClick={uploadPhoto}
-              type="button"
-            >
+            <button className="app-primary-button" disabled={isUploading} onClick={uploadPhoto} type="button">
               {isUploading ? "업로드 중" : "인증 사진 업로드"}
             </button>
           )}
-          <a
-            className="app-secondary-button"
-            download={downloadName}
-            href={previewUrl}
-          >
+          <a className="app-secondary-button" download={downloadName} href={previewUrl}>
             사진 저장하기
           </a>
-          <button
-            className="app-secondary-button"
-            onClick={retakePhoto}
-            type="button"
-          >
+          <button className="app-secondary-button" onClick={retakePhoto} type="button">
             다시 촬영
           </button>
         </div>
@@ -511,30 +642,21 @@ export function CertifyCamera() {
         <div className="grid gap-3">
           <button
             className="app-primary-button"
-            disabled={isStarting}
-            onClick={isCameraReady ? capturePhoto : startCamera}
+            disabled={hasCameraStream ? isCaptureDisabled : isStarting}
+            onClick={hasCameraStream ? capturePhoto : startCamera}
             type="button"
           >
-            {isCameraReady ? "촬영하기" : isStarting ? "카메라 준비 중" : "사진으로 인증하기"}
+            {hasCameraStream ? (isPreviewReady ? "촬영하기" : "카메라 준비 중") : isStarting ? "카메라 준비 중" : "사진으로 인증하기"}
           </button>
-          {isCameraReady ? (
-            <button
-              className="app-secondary-button"
-              onClick={stopCamera}
-              type="button"
-            >
+          {hasCameraStream ? (
+            <button className="app-secondary-button" onClick={stopCamera} type="button">
               카메라 끄기
             </button>
           ) : null}
           {IS_DEVELOPMENT ? (
             <label className="app-secondary-button border border-dashed border-[#BFDBFE]">
               PC 개발 테스트용 이미지 선택
-              <input
-                accept="image/*"
-                className="sr-only"
-                onChange={handleDevelopmentFileChange}
-                type="file"
-              />
+              <input accept="image/*" className="sr-only" onChange={handleDevelopmentFileChange} type="file" />
             </label>
           ) : null}
         </div>
