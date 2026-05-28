@@ -12,6 +12,11 @@
   box-sizing: border-box;
 }
 
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body {
   min-height: 100%;
@@ -39,12 +44,21 @@ input {
   font: inherit;
 }
 
+form,
+label {
+  max-width: 100%;
+  min-width: 0;
+}
+
 button,
 input,
 select,
 textarea {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 img,
@@ -57,9 +71,23 @@ svg {
 input[type="date"],
 input[type="month"] {
   width: 100%;
+  inline-size: 100%;
   min-width: 0;
+  max-width: 100%;
   -webkit-appearance: none;
   appearance: none;
+}
+
+input[type="date"]::-webkit-date-and-time-value,
+input[type="month"]::-webkit-date-and-time-value {
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator {
+  flex-shrink: 0;
 }
 
 @layer components {
@@ -68,11 +96,11 @@ input[type="month"] {
   }
 
   .app-card {
-    @apply min-w-0 max-w-full rounded-[24px] bg-white shadow-[0_18px_45px_rgba(15,23,42,0.08)];
+    @apply w-full min-w-0 max-w-full overflow-hidden rounded-[24px] bg-white shadow-[0_18px_45px_rgba(15,23,42,0.08)];
   }
 
   .app-card-soft {
-    @apply min-w-0 max-w-full rounded-[24px] bg-[#F8FAFF] shadow-[0_14px_35px_rgba(15,23,42,0.06)];
+    @apply w-full min-w-0 max-w-full overflow-hidden rounded-[24px] bg-[#F8FAFF] shadow-[0_14px_35px_rgba(15,23,42,0.06)];
   }
 
   .app-title {

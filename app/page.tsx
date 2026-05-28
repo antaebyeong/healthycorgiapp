@@ -7,7 +7,10 @@ type MeResponse = {
   member?: {
     status?: string;
   } | null;
+  isAuthenticated?: boolean;
 };
+
+const SESSION_CHECK_TIMEOUT_MS = 3000;
 
 export default function SplashPage() {
   const router = useRouter();
@@ -38,8 +41,17 @@ export default function SplashPage() {
 
   useEffect(() => {
     async function checkSession() {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => {
+        controller.abort();
+      }, SESSION_CHECK_TIMEOUT_MS);
+
       try {
-        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        const response = await fetch("/api/auth/me", {
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal
+        });
 
         if (!response.ok) {
           setTargetPath("/login");
@@ -47,9 +59,11 @@ export default function SplashPage() {
         }
 
         const result = (await response.json()) as MeResponse;
-        setTargetPath(result.member?.status === "approved" ? "/home" : "/login");
+        setTargetPath(result.isAuthenticated && result.member?.status === "approved" ? "/home" : "/login");
       } catch {
         setTargetPath("/login");
+      } finally {
+        window.clearTimeout(timeout);
       }
     }
 

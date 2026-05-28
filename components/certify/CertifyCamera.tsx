@@ -8,6 +8,41 @@ const MAX_IMAGE_SIZE = 1280;
 const JPEG_QUALITY = 0.8;
 const IS_DEVELOPMENT = process.env.NODE_ENV === "development";
 
+type InAppBrowserInfo = {
+  isInApp: boolean;
+  platform: "ios" | "android" | "other";
+};
+
+function detectInAppBrowser(userAgent: string): InAppBrowserInfo {
+  const normalized = userAgent.toLowerCase();
+  const isInApp =
+    normalized.includes("kakaotalk") ||
+    normalized.includes("instagram") ||
+    normalized.includes("naver") ||
+    normalized.includes("fbav") ||
+    normalized.includes("fban") ||
+    normalized.includes("line/") ||
+    normalized.includes("wv");
+
+  const platform = /iphone|ipad|ipod/.test(normalized) ? "ios" : /android/.test(normalized) ? "android" : "other";
+
+  return { isInApp, platform };
+}
+
+function getInAppBrowserGuide(info: InAppBrowserInfo) {
+  const platformGuide =
+    info.platform === "ios"
+      ? "오른쪽 아래 또는 공유 메뉴에서 Safari로 열어주세요."
+      : info.platform === "android"
+        ? "오른쪽 위 메뉴에서 Chrome으로 열어주세요."
+        : "기본 브라우저에서 다시 열어주세요.";
+
+  return {
+    title: "카메라 인증은 Safari 또는 Chrome에서 이용해주세요.",
+    description: `카카오톡 안에서 열면 카메라 권한이 제한될 수 있습니다. ${platformGuide}`
+  };
+}
+
 function getKoreaDateTime(date = new Date()) {
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
@@ -103,12 +138,38 @@ function drawWatermark(context: CanvasRenderingContext2D, width: number, height:
   const radius = Math.max(10, Math.round(fontSize * 0.35));
 
   context.fillStyle = "rgba(20, 16, 12, 0.74)";
-  context.beginPath();
-  context.roundRect(x, y, boxWidth, boxHeight, radius);
-  context.fill();
+  drawRoundedRect(context, x, y, boxWidth, boxHeight, radius);
 
   context.fillStyle = "#FFFFFF";
   context.fillText(text, width / 2, y + boxHeight / 2);
+}
+
+function drawRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) {
+  context.beginPath();
+
+  if (typeof context.roundRect === "function") {
+    context.roundRect(x, y, width, height, radius);
+  } else {
+    context.moveTo(x + radius, y);
+    context.lineTo(x + width - radius, y);
+    context.quadraticCurveTo(x + width, y, x + width, y + radius);
+    context.lineTo(x + width, y + height - radius);
+    context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    context.lineTo(x + radius, y + height);
+    context.quadraticCurveTo(x, y + height, x, y + height - radius);
+    context.lineTo(x, y + radius);
+    context.quadraticCurveTo(x, y, x + radius, y);
+  }
+
+  context.closePath();
+  context.fill();
 }
 
 export function CertifyCamera() {
@@ -124,6 +185,7 @@ export function CertifyCamera() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState("healthycorgi-certification.jpg");
   const [uploadedRecordId, setUploadedRecordId] = useState<string | null>(null);
+  const [inAppBrowser, setInAppBrowser] = useState<InAppBrowserInfo>({ isInApp: false, platform: "other" });
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -140,6 +202,10 @@ export function CertifyCamera() {
   }, []);
 
   useEffect(() => {
+    setInAppBrowser(detectInAppBrowser(window.navigator.userAgent));
+  }, []);
+
+  useEffect(() => {
     return () => {
       stopCamera();
       if (previewUrl) {
@@ -150,6 +216,13 @@ export function CertifyCamera() {
 
   async function startCamera() {
     setCameraError(null);
+
+    if (inAppBrowser.isInApp) {
+      const guide = getInAppBrowserGuide(inAppBrowser);
+      setCameraError(guide);
+      setMessage(guide.title);
+      return;
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       const errorMessage = {
@@ -334,6 +407,22 @@ export function CertifyCamera() {
         <p className="text-xs font-black text-[#6B7280]">한국 시간</p>
         <p className="mt-1 text-lg font-black text-[#111827]">{currentTime}</p>
       </div>
+
+      {inAppBrowser.isInApp && !previewUrl ? (
+        <div className="app-card p-5">
+          <p className="text-base font-black text-[#111827]">카메라 인증은 Safari 또는 Chrome에서 이용해주세요.</p>
+          <p className="mt-2 text-sm font-semibold leading-6 text-[#6B7280]">
+            카카오톡 안에서 열면 카메라 권한이 제한될 수 있습니다.
+          </p>
+          <p className="mt-2 text-sm font-black text-[#3182F6]">
+            {inAppBrowser.platform === "ios"
+              ? "오른쪽 아래 또는 공유 메뉴에서 Safari로 열어주세요."
+              : inAppBrowser.platform === "android"
+                ? "오른쪽 위 메뉴에서 Chrome으로 열어주세요."
+                : "기본 브라우저에서 다시 열어주세요."}
+          </p>
+        </div>
+      ) : null}
 
       <div className="app-card overflow-hidden bg-[#111827] p-2">
         {previewUrl ? (
