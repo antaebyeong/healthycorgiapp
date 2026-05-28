@@ -13,7 +13,7 @@ export function SetupAdminForm() {
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    fetch("/api/auth/setup-admin")
+    fetch("/api/auth/setup-admin", { credentials: "same-origin" })
       .then((response) => response.json())
       .then((result: { available?: boolean }) => setIsAvailable(Boolean(result.available)))
       .catch(() => {
@@ -29,6 +29,7 @@ export function SetupAdminForm() {
 
     const response = await fetch("/api/auth/setup-admin", {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, birthDate, adminCode })
     });

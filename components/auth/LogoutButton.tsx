@@ -9,7 +9,7 @@ export function LogoutButton() {
 
   async function handleLogout() {
     setIsLoading(true);
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", { credentials: "same-origin", method: "POST" });
     setIsLoading(false);
     router.push("/login");
     router.refresh();

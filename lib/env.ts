@@ -9,7 +9,7 @@ export function getRequiredServerEnv(name: string) {
 }
 
 export function getSessionCookieName() {
-  return process.env.SESSION_COOKIE_NAME || "healthycorgi_session";
+  return process.env.SESSION_COOKIE_NAME?.trim() || "healthycorgi_session";
 }
 
 export function getAdminCode() {

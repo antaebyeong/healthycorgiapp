@@ -51,7 +51,7 @@ export function AdminMemberList({ mode }: AdminMemberListProps) {
 
     const [response, meResponse] = await Promise.all([
       fetch(endpoint, { cache: "no-store" }),
-      fetch("/api/auth/me", { cache: "no-store" })
+      fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" })
     ]);
     const result = (await response.json()) as { members?: AdminMember[]; message?: string };
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseErrorResponse } from "@/lib/api-error";
+import { getSessionCookieName } from "@/lib/env";
 import { createSession, setSessionCookie } from "@/lib/session";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { validateAuthInput } from "@/lib/validators";
@@ -50,15 +51,28 @@ export async function POST(request: Request) {
 
   const isAdminSession = member.role === "admin";
   const { sessionId, expiresAt } = await createSession(member.id, isAdminSession);
-  const response = NextResponse.json({
-    message: "로그인되었습니다.",
-    member: {
-      id: member.id,
-      name: member.name,
-      role: member.role,
-      isAdminSession
+  const response = NextResponse.json(
+    {
+      message: "로그인되었습니다.",
+      member: {
+        id: member.id,
+        name: member.name,
+        role: member.role,
+        isAdminSession
+      },
+      ...(process.env.NODE_ENV === "development"
+        ? {
+            sessionCreated: true,
+            cookieName: getSessionCookieName()
+          }
+        : {})
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store"
+      }
     }
-  });
+  );
 
   setSessionCookie(response, sessionId, expiresAt);
   return response;

@@ -6,6 +6,18 @@ import { getSessionCookieName } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const SESSION_DAYS = 14;
+const SESSION_MAX_AGE_SECONDS = SESSION_DAYS * 24 * 60 * 60;
+
+function getSessionCookieOptions(expiresAt: Date) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS,
+    expires: expiresAt
+  };
+}
 
 export async function createSession(memberId: string, isAdmin: boolean) {
   const supabase = createSupabaseAdminClient();
@@ -32,22 +44,17 @@ export async function createSession(memberId: string, isAdmin: boolean) {
 }
 
 export function setSessionCookie(response: NextResponse, sessionId: string, expiresAt: Date) {
-  response.cookies.set(getSessionCookieName(), sessionId, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    expires: expiresAt
-  });
+  response.cookies.set(getSessionCookieName(), sessionId, getSessionCookieOptions(expiresAt));
 }
 
 export function clearSessionCookie(response: NextResponse) {
   response.cookies.set(getSessionCookieName(), "", {
     httpOnly: true,
-    sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
     path: "/",
-    maxAge: 0
+    maxAge: 0,
+    expires: new Date(0)
   });
 }
 
