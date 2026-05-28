@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -36,36 +37,41 @@ export function LoginForm() {
   }
 
   return (
-    <form className="app-card space-y-4 p-5" onSubmit={handleSubmit}>
-      <label className="block space-y-2">
-        <span className="text-sm font-bold text-[#6B7280]">이름</span>
-        <input
-          className="app-field"
-          name="name"
-          onChange={(event) => setName(event.target.value)}
-          required
-          value={name}
-        />
-      </label>
-      <label className="block space-y-2">
-        <span className="text-sm font-bold text-[#6B7280]">생년월일</span>
-        <input
-          className="app-field"
-          name="birthDate"
-          onChange={(event) => setBirthDate(event.target.value)}
-          required
-          type="date"
-          value={birthDate}
-        />
-      </label>
-      {message ? <p className="text-sm font-semibold text-[#6B7280]">{message}</p> : null}
-      <button
-        className="app-primary-button w-full"
-        disabled={isLoading}
-        type="submit"
-      >
-        {isLoading ? "확인 중" : "로그인"}
-      </button>
-    </form>
+    <div className="space-y-4">
+      <form className="app-card space-y-4 p-5" onSubmit={handleSubmit}>
+        <label className="block space-y-2">
+          <span className="text-sm font-bold text-[#6B7280]">이름</span>
+          <input
+            className="app-field"
+            name="name"
+            onChange={(event) => setName(event.target.value)}
+            required
+            value={name}
+          />
+        </label>
+        <label className="block space-y-2">
+          <span className="text-sm font-bold text-[#6B7280]">생년월일</span>
+          <input
+            className="app-field"
+            name="birthDate"
+            onChange={(event) => setBirthDate(event.target.value)}
+            required
+            type="date"
+            value={birthDate}
+          />
+        </label>
+        {message ? <p className="text-sm font-semibold text-[#6B7280]">{message}</p> : null}
+        <button className="app-primary-button w-full" disabled={isLoading} type="submit">
+          {isLoading ? "확인 중" : "로그인"}
+        </button>
+      </form>
+
+      <div className="app-card-soft p-5 text-center">
+        <p className="text-sm font-semibold text-[#6B7280]">아직 크루 멤버가 아니신가요?</p>
+        <Link className="mt-3 inline-flex min-h-[44px] w-full items-center justify-center rounded-[16px] bg-white px-4 text-sm font-black text-[#3182F6]" href="/signup">
+          가입 신청하기
+        </Link>
+      </div>
+    </div>
   );
 }

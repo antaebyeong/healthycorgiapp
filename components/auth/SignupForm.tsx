@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 
 export function SignupForm() {
@@ -8,6 +9,7 @@ export function SignupForm() {
   const [consent, setConsent] = useState(false);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -22,13 +24,34 @@ export function SignupForm() {
 
     const result = (await response.json()) as { message?: string };
     setIsLoading(false);
-    setMessage(result.message || (response.ok ? "가입 신청이 완료되었습니다." : "가입 신청에 실패했습니다."));
 
-    if (response.ok) {
-      setName("");
-      setBirthDate("");
-      setConsent(false);
+    if (!response.ok) {
+      setMessage(result.message || "가입 신청에 실패했습니다.");
+      return;
     }
+
+    setName("");
+    setBirthDate("");
+    setConsent(false);
+    setIsComplete(true);
+    setMessage("가입 신청이 완료되었습니다. 운영진 승인 후 로그인할 수 있습니다.");
+  }
+
+  if (isComplete) {
+    return (
+      <section className="app-card space-y-5 p-6 text-center">
+        <div>
+          <p className="text-sm font-black text-[#3182F6]">가입 신청 완료</p>
+          <h2 className="mt-2 text-2xl font-black text-[#111827]">운영진 승인 대기 중</h2>
+          <p className="mt-3 text-sm font-semibold leading-6 text-[#6B7280]">
+            가입 신청이 완료되었습니다. 운영진 승인 후 로그인할 수 있습니다.
+          </p>
+        </div>
+        <Link className="app-primary-button" href="/login">
+          로그인으로 이동
+        </Link>
+      </section>
+    );
   }
 
   return (
@@ -57,22 +80,18 @@ export function SignupForm() {
       <label className="flex gap-3 rounded-[18px] bg-[#F8FAFF] p-4 text-sm font-semibold leading-6 text-[#6B7280]">
         <input
           checked={consent}
-          className="mt-1 h-4 w-4"
+          className="mt-1 h-4 w-4 shrink-0"
           onChange={(event) => setConsent(event.target.checked)}
           type="checkbox"
         />
         <span>
-          운동 인증 사진은 헬시코기 승인 멤버 및 운영진에게 공개될 수 있습니다.
+          운동 인증 사진은 헬시코기 승인 회원 및 운영진에게 공개될 수 있습니다.
           <br />
           사진은 시즌 종료까지 보관되며, 운영진이 필요 시 삭제할 수 있습니다.
         </span>
       </label>
       {message ? <p className="text-sm font-semibold text-[#6B7280]">{message}</p> : null}
-      <button
-        className="app-primary-button w-full"
-        disabled={isLoading}
-        type="submit"
-      >
+      <button className="app-primary-button w-full" disabled={isLoading} type="submit">
         {isLoading ? "신청 중" : "가입 신청"}
       </button>
     </form>
